@@ -1,0 +1,25 @@
+
+
+# Logs and databases #
+######################
+*.log
+*.sql
+*.sqlite
+# Python #
+##########
+__pycache__/
+*.pyc
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache/
+.pytest_cache/
+
+# Environment variables #
+#########################
+.env
+.env.*
