@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 MODEL_PATH = PROJECT_ROOT / "models" / "best_model_advanced.pkl"
 
 # Binned feature parameters
-INCOME_BINS = [0, 25000, 40000, 60000, 90000, 150000]
+INCOME_BINS = [0, 71200, 134000, 197000, 260000, 323000, float('inf')]
 AGE_BINS = [0, 37.2, 53.4, 69.6, 85.8, 102, float('inf')]
 
 # Mapping for categorical features
