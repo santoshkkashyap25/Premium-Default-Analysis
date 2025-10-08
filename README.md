@@ -32,8 +32,9 @@ Insurance companies face significant revenue loss due to policy lapses when cust
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/insurance-premium-prediction.git
-cd insurance-premium-prediction
+git clone https://github.com/santoshkkashyap25/Premium-Default-Analysis.git
+cd Premium-Default-Analysis
+
 
 # Create virtual environment
 python -m venv venv
@@ -54,8 +55,44 @@ python adv_pipeline.py
 ### Make Predictions
 
 ```python
-python predict.py --data new_customers.csv
+python predict.py --data new_customers.csv # Batch Processing
+python predict_api.py  # Real Time Scoring
+````
+
+### Sample Request (using `curl`)
+
+```bash
+curl -X POST http://127.0.0.1:5000/predict \
+     -H "Content-Type: application/json" \
+     -d '{
+           "id": 110936,
+           "perc_premium_paid_by_cash_credit": 0.429,
+           "age_in_days": 12058,
+           "Income": 355060,
+           "Count_3-6_months_late": 0,
+           "Count_6-12_months_late": 0,
+           "Count_more_than_12_months_late": 0,
+           "application_underwriting_score": 99.02,
+           "no_of_premiums_paid": 13,
+           "sourcing_channel": "C",
+           "residence_area_type": "Urban"
+         }'
 ```
+
+### Sample Response
+
+```json
+{
+    "customer_id": 110936,
+    "on_time_probability": 0.85,
+    "non_payer_probability": 0.15,
+    "risk_tier": "Medium Risk",
+    "recommended_action": "Email + SMS reminder",
+    "intervention_cost": 10,
+    "model_confidence": "high"
+}
+```
+
 
 ## Model Performance
 
@@ -177,11 +214,9 @@ Current spend: $180k → $425k net benefit -->
 - Matplotlib, Seaborn
 - Plotly (interactive dashboards)
 
-<!-- **Deployment:**
+**Deployment:**
 - Flask API for real-time scoring
-- Docker containerization
-- GitHub Actions CI/CD
- -->
+
 
 ## Key Learnings
 
