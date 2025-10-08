@@ -23,3 +23,6 @@ pip-delete-this-directory.txt
 #########################
 .env
 .env.*
+
+
+/data/new_customers.csv
