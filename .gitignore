@@ -26,3 +26,4 @@ pip-delete-this-directory.txt
 
 
 /data/new_customers.csv
+outputs/monthly_interventions.csv
