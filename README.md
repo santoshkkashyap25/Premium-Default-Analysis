@@ -118,17 +118,6 @@ Based on model performance metrics and conservative business assumptions:
 - **Low-Medium Risk (20-40%):** 30.1% → SMS only ($2)
 - **Low Risk (<20%):** 36.6% → Standard communication ($0)
 
-## Important Note
-These projections are based on historical data analysis and model 
-performance metrics. Actual business impact would require:
-- Pilot deployment with A/B testing
-- Validation of retention rates
-- Real-world intervention effectiveness measurement
-- Continuous model monitoring and retraining
-
-This project demonstrates the methodology and technical feasibility of an ML-driven retention program.
-
-
 ## Technical Approach
 
 ### 1. Exploratory Data Analysis
