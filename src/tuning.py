@@ -125,11 +125,12 @@ def calibrate_probabilities(model, X_train, y_train, X_val, y_val, method='isoto
 
     # Calibrate
     calibrated_model = CalibratedClassifierCV(
-        model,
+        estimator=model,
         method=method,
-        cv='prefit'
+        cv=5
     )
     calibrated_model.fit(X_train, y_train)
+
 
     # Check calibration after
     y_prob_after = calibrated_model.predict_proba(X_val)[:, 1]

@@ -156,28 +156,29 @@ def create_binned_features(X_train, X_val, X_test):
     """Create binned versions of continuous features"""
     # Income bins
     income_bins = pd.qcut(X_train['Income'], q=5, duplicates='drop', retbins=True)[1]
+    income_bins[0] = -np.inf
+    income_bins[-1] = np.inf
     income_labels = list(range(len(income_bins)-1))
 
     X_train['income_class'] = pd.cut(X_train['Income'], bins=income_bins,
-                                     labels=income_labels, include_lowest=True).astype(int)
+                                     labels=income_labels, include_lowest=True).fillna(0).astype(int)
     X_val['income_class'] = pd.cut(X_val['Income'], bins=income_bins,
-                                   labels=income_labels, include_lowest=True).astype(int)
+                                   labels=income_labels, include_lowest=True).fillna(0).astype(int)
     X_test['income_class'] = pd.cut(X_test['Income'], bins=income_bins,
-                                    labels=income_labels, include_lowest=True).astype(int)
+                                    labels=income_labels, include_lowest=True).fillna(0).astype(int)
 
     # Age bins
-    age_bins = [0, 37.2, 53.4, 69.6, 85.8, 102, float('inf')]
+    age_bins = [-np.inf, 37.2, 53.4, 69.6, 85.8, 102, np.inf]
     age_labels = list(range(len(age_bins)-1))
 
     X_train['age_class'] = pd.cut(X_train['age'], bins=age_bins,
-                                  labels=age_labels, include_lowest=True).astype(int)
+                                  labels=age_labels, include_lowest=True).fillna(0).astype(int)
     X_val['age_class'] = pd.cut(X_val['age'], bins=age_bins,
-                                labels=age_labels, include_lowest=True).astype(int)
+                                labels=age_labels, include_lowest=True).fillna(0).astype(int)
     X_test['age_class'] = pd.cut(X_test['age'], bins=age_bins,
-                                 labels=age_labels, include_lowest=True).astype(int)
+                                 labels=age_labels, include_lowest=True).fillna(0).astype(int)
 
     return X_train, X_val, X_test
-
 
 
 def preprocess_for_trees(X_train, X_val, X_test):
@@ -190,10 +191,11 @@ def preprocess_for_trees(X_train, X_val, X_test):
 
     def transform(df):
         df = df.drop(drop_cols, axis=1, errors='ignore')
-        df['residence_area_type'] = df['residence_area_type'].map(res_area_map)
-        df['sourcing_channel'] = df['sourcing_channel'].map(sourcing_map)
-        df['income_class'] = df['income_class'].astype(int)
-        df['age_class'] = df['age_class'].astype(int)
+        df['residence_area_type'] = df['residence_area_type'].map(res_area_map).fillna(0)
+        df['sourcing_channel'] = df['sourcing_channel'].map(sourcing_map).fillna(0)
+        df['income_class'] = df['income_class'].fillna(0).astype(int)
+        df['age_class'] = df['age_class'].fillna(0).astype(int)
+        df = df.fillna(0)
         return df
 
     return transform(X_train.copy()), transform(X_val.copy()), transform(X_test.copy())
@@ -203,9 +205,9 @@ def preprocess_for_logreg(X_train, X_val, X_test):
     drop_cols = ['Income', 'Count_3-6_months_late', 'Count_6-12_months_late',
                  'Count_more_than_12_months_late', 'age', 'age_in_days']
 
-    X_train_lr = X_train.drop(drop_cols, axis=1, errors='ignore')
-    X_val_lr = X_val.drop(drop_cols, axis=1, errors='ignore')
-    X_test_lr = X_test.drop(drop_cols, axis=1, errors='ignore')
+    X_train_lr = X_train.drop(drop_cols, axis=1, errors='ignore').copy()
+    X_val_lr = X_val.drop(drop_cols, axis=1, errors='ignore').copy()
+    X_test_lr = X_test.drop(drop_cols, axis=1, errors='ignore').copy()
 
     X_train_lr = pd.get_dummies(X_train_lr, columns=['sourcing_channel', 'residence_area_type'],
                                 drop_first=True)
@@ -214,21 +216,14 @@ def preprocess_for_logreg(X_train, X_val, X_test):
     X_test_lr = pd.get_dummies(X_test_lr, columns=['sourcing_channel', 'residence_area_type'],
                                drop_first=True)
 
-    X_train_lr['income_class'] = X_train_lr['income_class'].astype(int)
-    X_val_lr['income_class'] = X_val_lr['income_class'].astype(int)
-    X_test_lr['income_class'] = X_test_lr['income_class'].astype(int)
-
-    X_train_lr['age_class'] = X_train_lr['age_class'].astype(int)
-    X_val_lr['age_class'] = X_val_lr['age_class'].astype(int)
-    X_test_lr['age_class'] = X_test_lr['age_class'].astype(int)
+    X_train_lr = X_train_lr.fillna(0)
+    X_val_lr = X_val_lr.fillna(0)
+    X_test_lr = X_test_lr.fillna(0)
 
     X_val_lr = X_val_lr.reindex(columns=X_train_lr.columns, fill_value=0)
     X_test_lr = X_test_lr.reindex(columns=X_train_lr.columns, fill_value=0)
 
-    numeric_features = ['perc_premium_paid_by_cash_credit',
-                       'application_underwriting_score',
-                       'no_of_premiums_paid',
-                       'late_premium']
+    numeric_features = [col for col in X_train_lr.columns if col not in ['income_class', 'age_class']]
 
     scaler = StandardScaler()
     X_train_lr[numeric_features] = scaler.fit_transform(X_train_lr[numeric_features])
@@ -236,6 +231,7 @@ def preprocess_for_logreg(X_train, X_val, X_test):
     X_test_lr[numeric_features] = scaler.transform(X_test_lr[numeric_features])
 
     return X_train_lr, X_val_lr, X_test_lr, scaler
+
 
 
 def find_optimal_threshold(model, X_val, y_val, metric='f1_class0'):

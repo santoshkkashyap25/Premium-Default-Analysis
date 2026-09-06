@@ -44,20 +44,29 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Train Model
+### Train Models
 
 ```bash
-# Run full training pipeline
-python pipeline.py
-python adv_pipeline.py
+# Run full model training pipeline (feature engineering, calibration, ensembles, business ROI)
+python train.py
+
+# Optional: Run fast training mode (skips Optuna hyperparameter search)
+python train.py --fast
 ```
 
-### Make Predictions
+### Make Predictions & Interactive Dashboard
 
-```python
-python predict.py --data new_customers.csv # Batch Processing
-python predict_api.py  # Real Time Scoring
-````
+```bash
+# Launch Interactive Streamlit Web Dashboard (Windows venv)
+.\venv\Scripts\streamlit run app.py
+
+# Or Start Real-Time REST API Server
+python predict.py
+
+```
+
+
+
 
 ### Sample Request (using `curl`)
 
