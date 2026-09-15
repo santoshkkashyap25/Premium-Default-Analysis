@@ -1,262 +1,178 @@
-import pandas as pd
+"""Preprocessing and feature engineering module for insurance default prediction.
+
+This module provides metadata-driven feature transformation for inference,
+ensuring strict parity with the verified notebook experimentation pipeline.
+"""
+
+from pathlib import Path
+import json
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import (accuracy_score, classification_report, confusion_matrix,
-                            roc_auc_score, f1_score, precision_recall_curve,
-                            precision_recall_fscore_support)
-import warnings
-warnings.filterwarnings("ignore")
+
+# Default metadata location
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_METADATA_PATH = PROJECT_ROOT / "models" / "experiment_metadata.json"
+
+RES_AREA_MAP = {'Urban': 1, 'Rural': 0}
+SOURCING_MAP = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
+
+AGE_BINS = [-np.inf, 35, 50, 65, 80, np.inf]
+AGE_LABELS = list(range(len(AGE_BINS) - 1))
+
+INCOME_BINS = [-np.inf, 100000, 140000, 190000, 260000, np.inf]
+INCOME_LABELS = list(range(len(INCOME_BINS) - 1))
+
+DROP_COLS = [
+    'age_in_days',
+    'Count_3-6_months_late',
+    'Count_6-12_months_late',
+    'Count_more_than_12_months_late',
+    'id',
+    'target',
+]
 
 
-def load_and_clean_data(filepath):
-    """Load data and perform initial cleaning"""
-    df = pd.read_csv(filepath)
-    df = df.drop('id', axis=1)
+def load_metadata(metadata_path=None):
+    """Load learned experiment statistics, feature columns, and decision thresholds."""
+    path = Path(metadata_path) if metadata_path else DEFAULT_METADATA_PATH
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Experiment metadata not found at {path}. "
+            "Please ensure models/experiment_metadata.json exists."
+        )
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-    # Handle missing values
-    late_cols = ['Count_3-6_months_late', 'Count_6-12_months_late',
-                 'Count_more_than_12_months_late']
+
+def preprocess_for_inference(df: pd.DataFrame, metadata: dict = None) -> pd.DataFrame:
+    """Transform raw customer input data into model-ready tree features.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Raw customer record(s) containing demographic and payment history fields.
+    metadata : dict, optional
+        Metadata dictionary containing training statistics and feature definitions.
+        If None, loaded from models/experiment_metadata.json.
+
+    Returns
+    -------
+    pd.DataFrame
+        Engineered feature matrix matching the champion model's feature space.
+    """
+    if metadata is None:
+        metadata = load_metadata()
+
+    stats = metadata.get('training_statistics', {})
+    underwriting_median = stats.get('underwriting_median', 99.21)
+    income_q25 = stats.get('income_q25', 106730.0)
+    income_median = stats.get('income_median', 165140.0)
+    late_max = stats.get('late_premium_max', 19.0)
+    inc_clip_lower = stats.get('income_clip_lower', 70070.0)
+    inc_clip_upper = stats.get('income_clip_upper', 450040.0)
+
+    feature_names = metadata.get('feature_names_tree', None)
+
+    d = df.copy()
+
+    # 1. Zero-delinquency imputation for missing late count fields
+    late_cols = [
+        'Count_3-6_months_late',
+        'Count_6-12_months_late',
+        'Count_more_than_12_months_late',
+    ]
     for col in late_cols:
-        df[col].fillna(0, inplace=True)
+        if col in d.columns:
+            d[col] = d[col].fillna(0).astype(float)
+        else:
+            d[col] = 0.0
 
-    df['application_underwriting_score'].fillna(
-        df['application_underwriting_score'].median(), inplace=True
+    # 2. Underwriting score imputation + missingness indicator
+    underwriting_col = 'application_underwriting_score'
+    if underwriting_col in d.columns:
+        d['underwriting_score_missing'] = d[underwriting_col].isna().astype(int)
+        d[underwriting_col] = pd.to_numeric(d[underwriting_col], errors='coerce').fillna(underwriting_median).astype(float)
+    else:
+        d['underwriting_score_missing'] = 1
+        d[underwriting_col] = underwriting_median
+
+    # 3. Row-level feature engineering
+    d['late_premium'] = (
+        d['Count_3-6_months_late'] +
+        d['Count_6-12_months_late'] +
+        d['Count_more_than_12_months_late']
     )
 
-    return df
+    # 3. Robust Age Calculation
+    if 'age' in d.columns and d['age'].notna().any():
+        d['age'] = pd.to_numeric(d['age'], errors='coerce').fillna(45.0).astype(float)
+    elif 'age_in_days' in d.columns and d['age_in_days'].notna().any():
+        d['age'] = (pd.to_numeric(d['age_in_days'], errors='coerce') // 365).fillna(45.0).astype(float)
+    else:
+        d['age'] = 45.0
 
+    d['underwriting_score_norm'] = (d[underwriting_col] / 100.0).astype(float)
 
-def engineer_features(df):
-    """Create derived features"""
-    df = df.copy()
+    d['recent_late_weighted'] = (
+        d['Count_3-6_months_late'] * 3.0 +
+        d['Count_6-12_months_late'] * 2.0 +
+        d['Count_more_than_12_months_late'] * 1.0
+    ).astype(float)
 
-    df['late_premium'] = (df['Count_3-6_months_late'] +
-                          df['Count_6-12_months_late'] +
-                          df['Count_more_than_12_months_late'])
+    if 'no_of_premiums_paid' not in d.columns:
+        d['no_of_premiums_paid'] = 12.0
+    d['no_of_premiums_paid'] = pd.to_numeric(d['no_of_premiums_paid'], errors='coerce').fillna(12.0).astype(float)
+    d['payment_reliability'] = (d['no_of_premiums_paid'] / (d['no_of_premiums_paid'] + d['late_premium'] + 1e-5)).astype(float)
 
-    df['age'] = df['age_in_days'] // 365
-    df['application_underwriting_score'] = df['application_underwriting_score'] / 100
+    if 'perc_premium_paid_by_cash_credit' not in d.columns:
+        d['perc_premium_paid_by_cash_credit'] = 0.0
+    d['perc_premium_paid_by_cash_credit'] = pd.to_numeric(d['perc_premium_paid_by_cash_credit'], errors='coerce').fillna(0.0).astype(float)
+    d['high_cash_late_combo'] = ((d['perc_premium_paid_by_cash_credit'] > 0.5) & (d['late_premium'] > 2)).astype(int)
 
-    return df
+    d['zero_late_payments'] = (d['late_premium'] == 0).astype(int)
+    d['chronic_late_payer'] = (d['late_premium'] >= 5).astype(int)
+    d['new_customer'] = (d['no_of_premiums_paid'] <= 3).astype(int)
 
+    # 4. Outlier clipping on Income using training bounds
+    if 'Income' not in d.columns:
+        d['Income'] = income_median
+    d['Income'] = pd.to_numeric(d['Income'], errors='coerce').fillna(income_median).clip(inc_clip_lower, inc_clip_upper).astype(float)
 
-def create_advanced_features(df):
-    """Create interaction and derived features"""
-    df = df.copy()
+    d['age_income_interaction'] = (d['age'] * np.log1p(d['Income'])).astype(float)
 
-    # Basic features from original pipeline
-    df['late_premium'] = (df['Count_3-6_months_late'] +
-                          df['Count_6-12_months_late'] +
-                          df['Count_more_than_12_months_late'])
+    # 5. Population-statistical features derived strictly from training statistics
+    d['financial_stress'] = ((d['Income'] < income_q25) & (d['late_premium'] > 1)).astype(int)
+    d['income_payment_ratio'] = (d['Income'] / (d['perc_premium_paid_by_cash_credit'] * income_median + 1.0)).astype(float)
+    d['composite_risk'] = (
+        (1.0 - d['underwriting_score_norm']) * 0.4 +
+        (d['late_premium'] / (late_max + 1.0)) * 0.6
+    ).astype(float)
 
-    df['age'] = df['age_in_days'] // 365
-    df['application_underwriting_score'] = df['application_underwriting_score'] / 100
+    # 6. Binned features
+    d['income_class'] = pd.cut(
+        d['Income'], bins=INCOME_BINS, labels=INCOME_LABELS, include_lowest=True
+    ).fillna(0).astype(int)
 
-    # 1. High cash payment + Late payments (risky combo)
-    df['high_cash_late_combo'] = (
-        (df['perc_premium_paid_by_cash_credit'] > 0.5) &
-        (df['late_premium'] > 2)
-    ).astype(int)
+    d['age_class'] = pd.cut(
+        d['age'], bins=AGE_BINS, labels=AGE_LABELS, include_lowest=True
+    ).fillna(0).astype(int)
 
-    # 2. Low income + High late payments (financial stress indicator)
-    df['financial_stress'] = (
-        (df['Income'] < df['Income'].quantile(0.25)) &
-        (df['late_premium'] > 1)
-    ).astype(int)
+    # 7. Categorical encoding for Tree-based models
+    if 'residence_area_type' in d.columns:
+        d['residence_area_type'] = d['residence_area_type'].map(RES_AREA_MAP).fillna(0).astype(int)
+    else:
+        d['residence_area_type'] = 1
 
-    # 3. Payment reliability score (ratio of on-time to total premiums)
-    df['payment_reliability'] = df['no_of_premiums_paid'] / (
-        df['no_of_premiums_paid'] + df['late_premium'] + 1e-5
-    )
+    if 'sourcing_channel' in d.columns:
+        d['sourcing_channel'] = d['sourcing_channel'].map(SOURCING_MAP).fillna(0).astype(int)
+    else:
+        d['sourcing_channel'] = 0
 
-    # 4. Risk score combining underwriting + payment history
-    df['composite_risk'] = (
-        (1 - df['application_underwriting_score']) * 0.4 +
-        (df['late_premium'] / (df['late_premium'].max() + 1)) * 0.6
-    )
+    # 8. Drop metadata and raw columns
+    X = d.drop(columns=DROP_COLS, errors='ignore')
 
-    # 5. Age-Income interaction (older high earners more stable)
-    df['age_income_interaction'] = df['age'] * np.log1p(df['Income'])
+    # 9. Align columns strictly to champion model feature names and cast to float
+    if feature_names is not None:
+        X = X.reindex(columns=feature_names, fill_value=0)
 
-    # 6. Recent late payment indicator (more weight to recent behavior)
-    df['recent_late_weighted'] = (
-        df['Count_3-6_months_late'] * 3 +
-        df['Count_6-12_months_late'] * 2 +
-        df['Count_more_than_12_months_late'] * 1
-    )
-
-    # 7. Income sufficiency (income relative to payment method)
-    df['income_payment_ratio'] = df['Income'] / (
-        df['perc_premium_paid_by_cash_credit'] * df['Income'].median() + 1
-    )
-
-    # 8. Binary flags for extreme cases
-    df['zero_late_payments'] = (df['late_premium'] == 0).astype(int)
-    df['chronic_late_payer'] = (df['late_premium'] >= 5).astype(int)
-    df['new_customer'] = (df['no_of_premiums_paid'] <= 3).astype(int)
-
-    return df
-
-def split_data(df, test_size=0.2, val_size=0.25, random_state=42):
-    """Split data with stratification"""
-    df_full_train, df_test = train_test_split(
-        df, test_size=test_size, random_state=random_state,
-        stratify=df['target']
-    )
-
-    df_train, df_val = train_test_split(
-        df_full_train, test_size=val_size, random_state=random_state,
-        stratify=df_full_train['target']
-    )
-
-    df_train = df_train.reset_index(drop=True)
-    df_val = df_val.reset_index(drop=True)
-    df_test = df_test.reset_index(drop=True)
-
-    y_train = df_train['target'].values
-    y_val = df_val['target'].values
-    y_test = df_test['target'].values
-
-    X_train = df_train.drop('target', axis=1)
-    X_val = df_val.drop('target', axis=1)
-    X_test = df_test.drop('target', axis=1)
-
-    return X_train, X_val, X_test, y_train, y_val, y_test
-
-
-def handle_outliers(X_train, X_val, X_test, y_train, y_val, y_test):
-    """Remove outliers"""
-    lower_bound = X_train['Income'].quantile(0.10)
-    upper_bound = X_train['Income'].quantile(0.95)
-
-    train_mask = (X_train['Income'] >= lower_bound) & (X_train['Income'] <= upper_bound)
-    X_train_filtered = X_train[train_mask].reset_index(drop=True)
-    y_train_filtered = y_train[train_mask]
-
-    X_val_clipped = X_val.copy()
-    X_val_clipped['Income'] = X_val_clipped['Income'].clip(lower_bound, upper_bound)
-
-    X_test_clipped = X_test.copy()
-    X_test_clipped['Income'] = X_test_clipped['Income'].clip(lower_bound, upper_bound)
-
-    print(f"Training samples: {len(X_train)} -> {len(X_train_filtered)}")
-    print(f"Income bounds: [{lower_bound:.0f}, {upper_bound:.0f}]")
-
-    return X_train_filtered, X_val_clipped, X_test_clipped, y_train_filtered, y_val, y_test
-
-
-def create_binned_features(X_train, X_val, X_test):
-    """Create binned versions of continuous features"""
-    # Income bins
-    income_bins = pd.qcut(X_train['Income'], q=5, duplicates='drop', retbins=True)[1]
-    income_bins[0] = -np.inf
-    income_bins[-1] = np.inf
-    income_labels = list(range(len(income_bins)-1))
-
-    X_train['income_class'] = pd.cut(X_train['Income'], bins=income_bins,
-                                     labels=income_labels, include_lowest=True).fillna(0).astype(int)
-    X_val['income_class'] = pd.cut(X_val['Income'], bins=income_bins,
-                                   labels=income_labels, include_lowest=True).fillna(0).astype(int)
-    X_test['income_class'] = pd.cut(X_test['Income'], bins=income_bins,
-                                    labels=income_labels, include_lowest=True).fillna(0).astype(int)
-
-    # Age bins
-    age_bins = [-np.inf, 37.2, 53.4, 69.6, 85.8, 102, np.inf]
-    age_labels = list(range(len(age_bins)-1))
-
-    X_train['age_class'] = pd.cut(X_train['age'], bins=age_bins,
-                                  labels=age_labels, include_lowest=True).fillna(0).astype(int)
-    X_val['age_class'] = pd.cut(X_val['age'], bins=age_bins,
-                                labels=age_labels, include_lowest=True).fillna(0).astype(int)
-    X_test['age_class'] = pd.cut(X_test['age'], bins=age_bins,
-                                 labels=age_labels, include_lowest=True).fillna(0).astype(int)
-
-    return X_train, X_val, X_test
-
-
-def preprocess_for_trees(X_train, X_val, X_test):
-    """Prepare data for tree-based models"""
-    drop_cols = ['Income', 'Count_3-6_months_late', 'Count_6-12_months_late',
-                 'Count_more_than_12_months_late', 'age', 'age_in_days']
-
-    res_area_map = {'Urban': 1, 'Rural': 0}
-    sourcing_map = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
-
-    def transform(df):
-        df = df.drop(drop_cols, axis=1, errors='ignore')
-        df['residence_area_type'] = df['residence_area_type'].map(res_area_map).fillna(0)
-        df['sourcing_channel'] = df['sourcing_channel'].map(sourcing_map).fillna(0)
-        df['income_class'] = df['income_class'].fillna(0).astype(int)
-        df['age_class'] = df['age_class'].fillna(0).astype(int)
-        df = df.fillna(0)
-        return df
-
-    return transform(X_train.copy()), transform(X_val.copy()), transform(X_test.copy())
-
-def preprocess_for_logreg(X_train, X_val, X_test):
-    """Prepare data for logistic regression"""
-    drop_cols = ['Income', 'Count_3-6_months_late', 'Count_6-12_months_late',
-                 'Count_more_than_12_months_late', 'age', 'age_in_days']
-
-    X_train_lr = X_train.drop(drop_cols, axis=1, errors='ignore').copy()
-    X_val_lr = X_val.drop(drop_cols, axis=1, errors='ignore').copy()
-    X_test_lr = X_test.drop(drop_cols, axis=1, errors='ignore').copy()
-
-    X_train_lr = pd.get_dummies(X_train_lr, columns=['sourcing_channel', 'residence_area_type'],
-                                drop_first=True)
-    X_val_lr = pd.get_dummies(X_val_lr, columns=['sourcing_channel', 'residence_area_type'],
-                              drop_first=True)
-    X_test_lr = pd.get_dummies(X_test_lr, columns=['sourcing_channel', 'residence_area_type'],
-                               drop_first=True)
-
-    X_train_lr = X_train_lr.fillna(0)
-    X_val_lr = X_val_lr.fillna(0)
-    X_test_lr = X_test_lr.fillna(0)
-
-    X_val_lr = X_val_lr.reindex(columns=X_train_lr.columns, fill_value=0)
-    X_test_lr = X_test_lr.reindex(columns=X_train_lr.columns, fill_value=0)
-
-    numeric_features = [col for col in X_train_lr.columns if col not in ['income_class', 'age_class']]
-
-    scaler = StandardScaler()
-    X_train_lr[numeric_features] = scaler.fit_transform(X_train_lr[numeric_features])
-    X_val_lr[numeric_features] = scaler.transform(X_val_lr[numeric_features])
-    X_test_lr[numeric_features] = scaler.transform(X_test_lr[numeric_features])
-
-    return X_train_lr, X_val_lr, X_test_lr, scaler
-
-
-
-def find_optimal_threshold(model, X_val, y_val, metric='f1_class0'):
-    y_val_prob = model.predict_proba(X_val)[:, 1]
-
-    precisions, recalls, thresholds = precision_recall_curve(y_val, y_val_prob, pos_label=1)
-
-    y_val_prob_class0 = 1 - y_val_prob
-    precisions_0, recalls_0, thresholds_0 = precision_recall_curve(
-        1 - y_val, y_val_prob_class0, pos_label=1
-    )
-
-    if metric == 'f1_class0':
-        f1_scores = 2 * precisions_0 * recalls_0 / (precisions_0 + recalls_0 + 1e-10)
-        optimal_idx = np.argmax(f1_scores)
-        optimal_threshold = 1 - thresholds_0[optimal_idx]  # Invert back
-    elif metric == 'recall_class0':
-        # Find threshold that gives ~70% recall for class 0
-        target_recall = 0.70
-        idx = np.argmin(np.abs(recalls_0 - target_recall))
-        optimal_threshold = 1 - thresholds_0[idx]
-    else:  # balanced
-        # Balance precision and recall for class 0
-        diff = np.abs(precisions_0 - recalls_0)
-        optimal_idx = np.argmin(diff)
-        optimal_threshold = 1 - thresholds_0[optimal_idx]
-
-    return optimal_threshold
+    return X.astype(float)

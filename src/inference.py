@@ -1,9 +1,15 @@
-import pandas as pd
-import numpy as np
-import pickle
-from pathlib import Path
+"""Modular Inference Pipeline for Insurance Premium Default Risk Profiling.
 
-# Ensure ML libraries are imported for unpickling models
+Loads the calibrated champion model artifact and metadata to score policyholders,
+route them into tiered operational interventions, and calculate cost efficiency.
+"""
+
+from pathlib import Path
+import pickle
+import numpy as np
+import pandas as pd
+
+# Import xgboost and lightgbm to ensure pickle unpickling succeeds
 try:
     import xgboost as xgb
 except ImportError:
@@ -14,146 +20,125 @@ try:
 except ImportError:
     lgb = None
 
-from src.preprocessing import create_advanced_features
+from src.preprocessing import preprocess_for_inference, load_metadata
 
-
-# Default paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "best_model.pkl"
-DEFAULT_SCALER_PATH = PROJECT_ROOT / "models" / "preprocessing_scaler.pkl"
+DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "champion_model.pkl"
+DEFAULT_METADATA_PATH = PROJECT_ROOT / "models" / "experiment_metadata.json"
 
-# Constants for preprocessing
-INCOME_BINS = [-np.inf, 71200, 134000, 197000, 260000, 323000, np.inf]
-AGE_BINS = [-np.inf, 37.2, 53.4, 69.6, 85.8, 102, np.inf]
+INTERVENTION_ACTIONS = {
+    'High Risk': 'Outbound concierge phone call + premium restructuring offer',
+    'Medium Risk': 'Direct mail notice + priority SMS alert',
+    'Low-Medium Risk': 'Automated SMS reminder',
+    'Low Risk': 'Standard automated billing notice (no extra outreach)'
+}
 
-RES_AREA_MAP = {'Urban': 1, 'Rural': 0}
-SOURCING_MAP = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
-DROP_COLS = ['Income', 'Count_3-6_months_late', 'Count_6-12_months_late',
-             'Count_more_than_12_months_late', 'age', 'age_in_days']
-
-INTERVENTION_COSTS = {'high': 50, 'medium': 10, 'low': 2, 'none': 0}
+INTERVENTION_COSTS = {
+    'High Risk': 50,
+    'Medium Risk': 10,
+    'Low-Medium Risk': 2,
+    'Low Risk': 0
+}
 
 
 class InferencePipeline:
-    """Modular Inference Pipeline for scoring insurance default risk from pre-trained model artifacts."""
+    """Production inference pipeline for insurance premium default prediction."""
 
-    def __init__(self, model_path=None, scaler_path=None):
+    def __init__(self, model_path=None, metadata_path=None):
         self.model_path = Path(model_path) if model_path else DEFAULT_MODEL_PATH
         if not self.model_path.exists():
-            # Fallback to legacy model path
-            fallback = PROJECT_ROOT / "models" / "best_model_advanced.pkl"
+            # Fallback to best_model.pkl if champion_model.pkl is missing
+            fallback = PROJECT_ROOT / "models" / "best_model.pkl"
             if fallback.exists():
                 self.model_path = fallback
 
-        self.scaler_path = Path(scaler_path) if scaler_path else DEFAULT_SCALER_PATH
-
+        self.metadata_path = Path(metadata_path) if metadata_path else DEFAULT_METADATA_PATH
+        self.metadata = self._load_metadata()
         self.model = self._load_model()
-        self.scaler = self._load_scaler()
+        self.optimal_threshold = float(self.metadata.get('optimal_threshold', 0.768))
+
+    def _load_metadata(self):
+        return load_metadata(self.metadata_path)
 
     def _load_model(self):
         if not self.model_path.exists():
-            raise FileNotFoundError(f"Trained model file not found at {self.model_path}. Please run train.py first.")
-        with open(self.model_path, 'rb') as f:
-            model = pickle.load(f)
-        return model
+            raise FileNotFoundError(
+                f"Trained champion model not found at {self.model_path}. "
+                "Please verify models/champion_model.pkl or models/best_model.pkl."
+            )
+        with open(self.model_path, "rb") as f:
+            return pickle.load(f)
 
-    def _load_scaler(self):
-        if self.scaler_path.exists():
-            with open(self.scaler_path, 'rb') as f:
-                return pickle.load(f)
-        return None
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply leak-free feature engineering and align to model feature space."""
+        return preprocess_for_inference(df, metadata=self.metadata)
 
-    def transform(self, df):
-        """Prepare raw input DataFrame for inference."""
-        df_processed = df.copy()
+    def assign_risk_tiers(self, default_probs: np.ndarray):
+        """Map default probabilities to operational tiers, recommended actions, and costs."""
+        tiers = np.where(
+            default_probs > 0.70, 'High Risk',
+            np.where(
+                default_probs > 0.40, 'Medium Risk',
+                np.where(default_probs > 0.20, 'Low-Medium Risk', 'Low Risk')
+            )
+        )
+        actions = [INTERVENTION_ACTIONS[t] for t in tiers]
+        costs = [INTERVENTION_COSTS[t] for t in tiers]
 
-        # Handle missing values in raw features
-        late_cols = ['Count_3-6_months_late', 'Count_6-12_months_late', 'Count_more_than_12_months_late']
-        for col in late_cols:
-            if col in df_processed.columns:
-                df_processed[col] = df_processed[col].fillna(0)
+        return tiers, actions, costs
 
-        if 'application_underwriting_score' in df_processed.columns:
-            df_processed['application_underwriting_score'] = df_processed['application_underwriting_score'].fillna(99.0)
+    def predict(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Run end-to-end inference on batch or single-row DataFrame.
 
-        # Apply advanced feature engineering
-        df_processed = create_advanced_features(df_processed)
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input DataFrame containing policyholder features.
 
-        # Binned features
-        if 'Income' in df_processed.columns:
-            income_labels = list(range(len(INCOME_BINS)-1))
-            df_processed['income_class'] = pd.cut(
-                df_processed['Income'], bins=INCOME_BINS, labels=income_labels, include_lowest=True
-            ).fillna(0).astype(int)
+        Returns
+        -------
+        pd.DataFrame
+            Enriched results DataFrame containing probabilities, status, risk tiers,
+            recommended actions, and projected intervention costs.
+        """
+        X = self.transform(df)
 
-        if 'age' in df_processed.columns:
-            age_labels = list(range(len(AGE_BINS)-1))
-            df_processed['age_class'] = pd.cut(
-                df_processed['age'], bins=AGE_BINS, labels=age_labels, include_lowest=True
-            ).fillna(0).astype(int)
+        # Champion model returns [P(default), P(on-time)]
+        # Class 1 is on-time; Class 0 is default
+        on_time_probs = self.model.predict_proba(X)[:, 1]
+        default_probs = 1.0 - on_time_probs
 
-        # Categorical mappings
-        if 'residence_area_type' in df_processed.columns:
-            df_processed['residence_area_type'] = df_processed['residence_area_type'].map(RES_AREA_MAP).fillna(0)
-        if 'sourcing_channel' in df_processed.columns:
-            df_processed['sourcing_channel'] = df_processed['sourcing_channel'].map(SOURCING_MAP).fillna(0)
+        # Decision thresholding optimized on Validation PR curve
+        is_on_time = (on_time_probs >= self.optimal_threshold).astype(int)
+        predicted_status = np.where(is_on_time == 1, 'On-Time', 'Default Risk')
 
-        # Drop unused metadata/raw columns
-        drop_list = [c for c in DROP_COLS + ['id', 'target'] if c in df_processed.columns]
-        X = df_processed.drop(columns=drop_list, errors='ignore')
+        tiers, actions, costs = self.assign_risk_tiers(default_probs)
 
-        # Fill any remaining missing values
-        X = X.fillna(0)
+        # Retain customer ID if provided, otherwise generate clean string IDs
+        if 'id' in df.columns:
+            customer_ids = [
+                str(val) if pd.notna(val) and val is not None else f"POL-{i+1:05d}"
+                for i, val in enumerate(df['id'])
+            ]
+        else:
+            customer_ids = [f"POL-{i+1:05d}" for i in range(len(df))]
 
-        # Match exact feature names expected by trained model
-        if hasattr(self.model, 'feature_names_in_'):
-            X = X.reindex(columns=self.model.feature_names_in_, fill_value=0)
-
-        return X
-
-    def assign_risk_tiers(self, probs):
-        """Assign risk tiers and recommended intervention actions based on probabilities."""
-        tiers, actions, costs = [], [], []
-
-        for p in probs:
-            if p >= 0.7:
-                tiers.append('High Risk')
-                actions.append('Personal call + Special offer')
-                costs.append(INTERVENTION_COSTS['high'])
-            elif p >= 0.4:
-                tiers.append('Medium Risk')
-                actions.append('Email + SMS reminder')
-                costs.append(INTERVENTION_COSTS['medium'])
-            elif p >= 0.2:
-                tiers.append('Low-Medium Risk')
-                actions.append('SMS reminder')
-                costs.append(INTERVENTION_COSTS['low'])
-            else:
-                tiers.append('Low Risk')
-                actions.append('Standard communication')
-                costs.append(INTERVENTION_COSTS['none'])
-
-        return pd.DataFrame({
+        results = pd.DataFrame({
+            'customer_id': customer_ids,
+            'default_probability': np.round(default_probs, 4),
+            'on_time_probability': np.round(on_time_probs, 4),
+            'non_payer_probability': np.round(default_probs, 4),
+            'predicted_status': predicted_status,
             'risk_tier': tiers,
+            'recommended_action': actions,
             'intervention_action': actions,
             'intervention_cost': costs
         })
 
-    def predict(self, df):
-        """Run complete inference workflow on new input data."""
-        X_proc = self.transform(df)
-        probs = self.model.predict_proba(X_proc)[:, 1]
-        non_payer_probs = 1.0 - probs
+        return results
 
-        tiers_df = self.assign_risk_tiers(non_payer_probs)
-
-        cust_ids = df['id'] if 'id' in df.columns else df.index
-
-        results_df = pd.DataFrame({
-            'customer_id': cust_ids,
-            'on_time_probability': np.round(probs, 4),
-            'non_payer_probability': np.round(non_payer_probs, 4)
-        })
-
-        results_df = pd.concat([results_df, tiers_df], axis=1)
-        return results_df
+    def predict_one(self, record: dict) -> dict:
+        """Convenience method for scoring a single policyholder record dictionary."""
+        df_single = pd.DataFrame([record])
+        results_df = self.predict(df_single)
+        return results_df.iloc[0].to_dict()
