@@ -1,7 +1,7 @@
 """Insurance Premium Default Risk Profiler - Production Web Application.
 
-Provides interactive single-customer risk profiling, bulk batch CSV scoring,
-and financial ROI analytics powered by the calibrated champion XGBoost model.
+Provides interactive single-customer risk profiling and bulk batch CSV scoring
+powered by the calibrated champion XGBoost model.
 """
 
 from pathlib import Path
@@ -14,7 +14,6 @@ from src.inference import InferencePipeline
 # Page Configuration
 st.set_page_config(
     page_title="Insurance Premium Default Risk Profiler",
-    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -60,6 +59,35 @@ st.markdown("""
         font-weight: 700;
         color: #111827;
     }
+    .badge {
+        display: inline-block;
+        padding: 0.25rem 0.65rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        border-radius: 9999px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .badge-high {
+        background-color: #FEE2E2;
+        color: #991B1B;
+        border: 1px solid #FCA5A5;
+    }
+    .badge-med {
+        background-color: #FEF3C7;
+        color: #92400E;
+        border: 1px solid #FCD34D;
+    }
+    .badge-low-med {
+        background-color: #DBEAFE;
+        color: #1E40AF;
+        border: 1px solid #93C5FD;
+    }
+    .badge-low {
+        background-color: #D1FAE5;
+        color: #065F46;
+        border: 1px solid #6EE7B7;
+    }
     .tier-card-high {
         background-color: #FEF2F2;
         border-left: 6px solid #EF4444;
@@ -102,14 +130,14 @@ def get_pipeline():
     try:
         return InferencePipeline()
     except Exception as e:
-        st.error(f"⚠️ Failed to initialize inference pipeline: {e}")
+        st.error(f"Failed to initialize inference pipeline: {e}")
         return None
 
 
 pipeline = get_pipeline()
 
 # Title Header
-st.markdown('<div class="main-title">🛡️ Insurance Premium Default Risk Profiler</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">Insurance Premium Default Risk Profiler</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-title">Identify high-risk policyholders prior to premium lapse and automate cost-effective outreach interventions.</div>',
     unsafe_allow_html=True
@@ -119,40 +147,37 @@ if pipeline is None:
     st.error("Model artifact or metadata is missing. Please verify `models/champion_model.pkl`.")
     st.stop()
 
-# Sidebar Navigation & Model Info
-st.sidebar.image("https://img.icons8.com/fluency/96/shield.png", width=64)
+# Sidebar Navigation
 st.sidebar.title("Operational Control")
 app_mode = st.sidebar.radio(
     "Select Workflow:",
     [
-        "👤 Single Policyholder Scoring",
-        "📁 Bulk Batch CSV Scoring",
-        "📊 Strategy & Economic Blueprint"
+        "Single Policyholder Scoring",
+        "Bulk Batch CSV Scoring"
     ]
 )
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Production Model Telemetry")
-st.sidebar.info(f"""
-- **Champion Model**: `{pipeline.model_path.name}`
-- **Optimal Decision Threshold**: `{pipeline.optimal_threshold:.3f}`
-- **Probability Calibration**: `Isotonic Regression`
-- **Verified Benchmark**: `3,224% ROI` | `$186k+ Net Benefit`
-""")
 
 
 # ==============================================================================
 # MODE 1: SINGLE POLICYHOLDER SCORING
 # ==============================================================================
-if app_mode == "👤 Single Policyholder Scoring":
-    st.subheader("Policyholder Assessment Form")
-    st.caption("Enter customer demographics, payment behavior, and policy attributes to calculate calibrated lapse risk.")
+if app_mode == "Single Policyholder Scoring":
+    hdr_c1, hdr_c2 = st.columns([4, 1])
+    with hdr_c1:
+        st.subheader("Policyholder Assessment Form")
+        st.caption("Enter customer demographics, payment behavior, and policy attributes to calculate calibrated lapse risk.")
+    with hdr_c2:
+        if st.button("Reset to Defaults", use_container_width=True, help="Clear form inputs back to pristine default values"):
+            st.session_state['form_run_id'] = st.session_state.get('form_run_id', 0) + 1
+            st.session_state.pop('single_res', None)
+            st.rerun()
 
-    with st.form("single_scoring_form"):
+    form_id = f"single_scoring_form_{st.session_state.get('form_run_id', 0)}"
+    with st.form(form_id):
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.markdown("##### 👤 Customer Profile")
+            st.markdown("##### Customer Profile")
             age_years = st.number_input(
                 "Age (Years)",
                 min_value=18, max_value=100, value=38, step=1,
@@ -166,13 +191,13 @@ if app_mode == "👤 Single Policyholder Scoring":
             )
             sourcing = st.selectbox(
                 "Sourcing Channel",
-                options=["A", "B", "C", "D", "E"],
+                options=["A", "B", "C", "D", "E", "Unknown / Other"],
                 index=2,
-                help="Policy acquisition channel code."
+                help="Policy acquisition channel code. Select 'Unknown / Other' if unrecorded."
             )
 
         with col2:
-            st.markdown("##### 💳 Financial Metrics")
+            st.markdown("##### Financial Metrics")
             income = st.number_input(
                 "Annual Income ($)",
                 min_value=10000, max_value=5000000, value=145000, step=5000,
@@ -183,14 +208,24 @@ if app_mode == "👤 Single Policyholder Scoring":
                 min_value=0.0, max_value=1.0, value=0.45, step=0.01,
                 help="Percentage of previous premiums paid via cash or credit card (0.0 = 0%, 1.0 = 100%)."
             )
+            cash_credit_missing = st.checkbox(
+                "Payment method not recorded",
+                value=False,
+                help="Check if payment method is unknown (will use population median)."
+            )
             underwriting_score = st.slider(
                 "Application Underwriting Score (0-100)",
                 min_value=0.0, max_value=100.0, value=98.5, step=0.1,
-                help="Credit/underwriting score from application. Median imputation applied if omitted."
+                help="Credit/underwriting score from application."
+            )
+            underwriting_missing = st.checkbox(
+                "Underwriting score not available / omitted",
+                value=False,
+                help="Check if underwriting score was not captured (will use population median)."
             )
 
         with col3:
-            st.markdown("##### ⏱️ Payment & Delinquency History")
+            st.markdown("##### Payment & Delinquency History")
             no_premiums_paid = st.number_input(
                 "Total Premiums Paid On-Time",
                 min_value=1, max_value=100, value=12, step=1,
@@ -212,7 +247,7 @@ if app_mode == "👤 Single Policyholder Scoring":
                 help="Number of times premium was more than 12 months late."
             )
 
-        submitted = st.form_submit_button("🔍 Evaluate Default Risk & Outreach Action", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("Evaluate Default Risk & Outreach Action", use_container_width=True, type="primary")
 
     if submitted:
         input_data = {
@@ -220,8 +255,8 @@ if app_mode == "👤 Single Policyholder Scoring":
             "residence_area_type": residence,
             "sourcing_channel": sourcing,
             "Income": income,
-            "perc_premium_paid_by_cash_credit": perc_cash_credit,
-            "application_underwriting_score": underwriting_score,
+            "perc_premium_paid_by_cash_credit": None if cash_credit_missing else perc_cash_credit,
+            "application_underwriting_score": None if underwriting_missing else underwriting_score,
             "no_of_premiums_paid": no_premiums_paid,
             "Count_3-6_months_late": late_3_6,
             "Count_6-12_months_late": late_6_12,
@@ -229,8 +264,10 @@ if app_mode == "👤 Single Policyholder Scoring":
         }
 
         with st.spinner("Scoring customer risk profile with Calibrated XGBoost..."):
-            res = pipeline.predict_one(input_data)
+            st.session_state['single_res'] = pipeline.predict_one(input_data)
 
+    res = st.session_state.get('single_res', None)
+    if res is not None:
         st.markdown("---")
         st.subheader("Assessment Results")
 
@@ -252,33 +289,33 @@ if app_mode == "👤 Single Policyholder Scoring":
         if tier == 'High Risk':
             st.markdown(f"""
             <div class="tier-card-high">
-                <h4>🔴 High Risk Tier ({default_prob_pct:.1f}% Default Probability)</h4>
-                <p><strong>Action:</strong> {res['recommended_action']}</p>
-                <p><strong>Protocol:</strong> Route to Senior Retention Concierge within 24 hours. Present restructured payment schedule and auto-debit discount.</p>
+                <h4><span class="badge badge-high">High Risk Tier</span> &nbsp; {default_prob_pct:.1f}% Default Probability</h4>
+                <p><strong>Recommended Action:</strong> {res['recommended_action']}</p>
+                <p><strong>Operational Protocol:</strong> Route to Senior Retention Concierge within 24 hours. Present restructured payment schedule and auto-debit discount.</p>
             </div>
             """, unsafe_allow_html=True)
         elif tier == 'Medium Risk':
             st.markdown(f"""
             <div class="tier-card-med">
-                <h4>🟠 Medium Risk Tier ({default_prob_pct:.1f}% Default Probability)</h4>
-                <p><strong>Action:</strong> {res['recommended_action']}</p>
-                <p><strong>Protocol:</strong> Dispatch priority physical reminder letter + urgent SMS reminder 14 days and 5 days before lapse date.</p>
+                <h4><span class="badge badge-med">Medium Risk Tier</span> &nbsp; {default_prob_pct:.1f}% Default Probability</h4>
+                <p><strong>Recommended Action:</strong> {res['recommended_action']}</p>
+                <p><strong>Operational Protocol:</strong> Dispatch priority physical reminder letter + urgent SMS reminder 14 days and 5 days before lapse date.</p>
             </div>
             """, unsafe_allow_html=True)
         elif tier == 'Low-Medium Risk':
             st.markdown(f"""
             <div class="tier-card-low-med">
-                <h4>🟡 Low-Medium Risk Tier ({default_prob_pct:.1f}% Default Probability)</h4>
-                <p><strong>Action:</strong> {res['recommended_action']}</p>
-                <p><strong>Protocol:</strong> Trigger automated two-touch SMS payment link 3 days prior to due date.</p>
+                <h4><span class="badge badge-low-med">Low-Medium Risk Tier</span> &nbsp; {default_prob_pct:.1f}% Default Probability</h4>
+                <p><strong>Recommended Action:</strong> {res['recommended_action']}</p>
+                <p><strong>Operational Protocol:</strong> Trigger automated two-touch SMS payment link 3 days prior to due date.</p>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
             <div class="tier-card-low">
-                <h4>🟢 Low Risk Tier ({default_prob_pct:.1f}% Default Probability)</h4>
-                <p><strong>Action:</strong> {res['recommended_action']}</p>
-                <p><strong>Protocol:</strong> Standard automated digital invoice. No additional intervention expenditure required.</p>
+                <h4><span class="badge badge-low">Low Risk Tier</span> &nbsp; {default_prob_pct:.1f}% Default Probability</h4>
+                <p><strong>Recommended Action:</strong> {res['recommended_action']}</p>
+                <p><strong>Operational Protocol:</strong> Standard automated digital invoice. No additional intervention expenditure required.</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -286,9 +323,9 @@ if app_mode == "👤 Single Policyholder Scoring":
 # ==============================================================================
 # MODE 2: BULK BATCH CSV SCORING
 # ==============================================================================
-elif app_mode == "📁 Bulk Batch CSV Scoring":
+elif app_mode == "Bulk Batch CSV Scoring":
     st.subheader("Portfolio Batch Risk Scoring & Financial Projection")
-    st.markdown("Upload a customer CSV dataset to evaluate risk tiers, intervention budgets, and portfolio ROI in real time.")
+    st.markdown("Upload a customer CSV dataset to evaluate risk tiers, intervention budgets, and portfolio metrics in real time.")
 
     sample_template = pd.DataFrame([{
         "id": "POL-1001",
@@ -307,7 +344,7 @@ elif app_mode == "📁 Bulk Batch CSV Scoring":
     c_down, c_up = st.columns([1, 3])
     with c_down:
         st.download_button(
-            "📥 Download Sample CSV Template",
+            "Download Sample CSV Template",
             data=sample_template.to_csv(index=False),
             file_name="sample_policyholder_template.csv",
             mime="text/csv"
@@ -319,23 +356,25 @@ elif app_mode == "📁 Bulk Batch CSV Scoring":
         df_uploaded = pd.read_csv(uploaded_file)
         st.success(f"Successfully ingested {len(df_uploaded):,} policyholder records.")
 
-        if st.button("🚀 Execute Batch Scoring", type="primary"):
+        if st.button("Execute Batch Scoring", type="primary"):
             with st.spinner(f"Scoring {len(df_uploaded):,} records across 22 engineered features..."):
                 results = pipeline.predict(df_uploaded)
 
             st.markdown("---")
-            st.subheader("Batch Evaluation & Economic Impact")
+            st.subheader("Batch Evaluation & Portfolio Metrics")
 
             # Portfolio Economic KPIs
             k1, k2, k3, k4 = st.columns(4)
             total_customers = len(results)
             high_risk_n = int(np.sum(results['risk_tier'] == 'High Risk'))
             med_risk_n = int(np.sum(results['risk_tier'] == 'Medium Risk'))
+            high_med_total = high_risk_n + med_risk_n
+            high_med_pct = (high_med_total / total_customers * 100) if total_customers > 0 else 0.0
             total_cost = results['intervention_cost'].sum()
             avg_default_risk = results['default_probability'].mean() * 100
 
             k1.metric("Total Customers Scored", f"{total_customers:,}")
-            k2.metric("High / Medium Risk", f"{high_risk_n + med_risk_n:,}", f"{(high_risk_n + med_risk_n)/total_customers*100:.1f}%")
+            k2.metric("High / Medium Risk", f"{high_med_total:,} ({high_med_pct:.1f}%)", help="Count and percentage share of the portfolio requiring active outreach intervention.")
             k3.metric("Total Intervention Budget", f"${total_cost:,.0f}")
             k4.metric("Avg Portfolio Default Risk", f"{avg_default_risk:.1f}%")
 
@@ -346,55 +385,28 @@ elif app_mode == "📁 Bulk Batch CSV Scoring":
             ).fillna(0)
             st.bar_chart(tier_counts)
 
+            # Collapsible Data Dictionary / Column Glossary
+            with st.expander("Column Glossary & Data Dictionary", expanded=False):
+                st.markdown("""
+| Column Name | Business Definition |
+| :--- | :--- |
+| `customer_id` | Unique identifier for the policyholder (retained from input `id` or system-generated `POL-XXXXX`). |
+| `default_probability` | Calibrated probability that the customer will default / lapse on the upcoming premium payment (0.00 to 1.00). |
+| `on_time_probability` | Probability that the customer will pay on time (1.00 minus default_probability). |
+| `predicted_status` | Classification outcome (`Default Risk` vs `On-Time`) applying the optimal 0.768 threshold. |
+| `risk_tier` | Operational category: `High Risk` (>70%), `Medium Risk` (40%–70%), `Low-Medium Risk` (20%–40%), `Low Risk` (≤20%). |
+| `recommended_action` | Prescribed operational outreach intervention (e.g. Concierge Phone Call, Direct Mail + SMS, Automated SMS, Standard Billing). |
+| `intervention_cost` | Operational cost per policyholder in USD (50, 10, 2, or 0 depending on the assigned risk tier). |
+                """)
+
             st.markdown("##### Scored Customer Predictions")
             st.dataframe(results, use_container_width=True)
 
             csv_data = results.to_csv(index=False)
             st.download_button(
-                "💾 Export Scored Predictions CSV",
+                "Export Scored Predictions CSV",
                 data=csv_data,
                 file_name="scored_policyholder_predictions.csv",
                 mime="text/csv",
                 type="primary"
             )
-
-
-# ==============================================================================
-# MODE 3: STRATEGY & ECONOMIC BLUEPRINT
-# ==============================================================================
-elif app_mode == "📊 Strategy & Economic Blueprint":
-    st.subheader("Risk-Based Operational Intervention Protocol")
-    st.markdown("""
-    To eliminate asymmetric financial loss, policyholders are routed into tiered operational workflows:
-    """)
-
-    st.markdown("""
-    | Risk Tier | Default Probability | Operational Action | Cost / Policy | Economic Strategy |
-    | :--- | :---: | :--- | :---: | :--- |
-    | **🔴 High Risk** | $> 70\%$ | Outbound Concierge Phone Call | **$50** | High-touch outreach to restructure policy terms and prevent guaranteed lapse. |
-    | **🟠 Medium Risk** | $40\% – 70\%$ | Direct Mail + Priority SMS Alert | **$10** | Multi-touch reminder sequence before lapse grace period expires. |
-    | **🟡 Low-Medium Risk** | $20\% – 40\%$ | Automated SMS Reminder | **$2** | Lightweight digital touchpoint to prompt timely billing action. |
-    | **🟢 Low Risk** | $\le 20\%$ | Standard Digital Billing | **$0** | Zero extra expenditure; standard automated invoice. |
-    """)
-
-    st.markdown("---")
-    st.subheader("Financial Model & Asymmetric Cost Matrix")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.info("""
-        **Cost Parameters**:
-        - **False Negative Loss ($500)**: Lifetime policy value lost when a defaulter lapses undetected.
-        - **False Alarm Cost ($10)**: Cost of an unnecessary reminder outreach to an on-time payer.
-        - **Policy Revenue Preserved ($500)**: Average preserved premium revenue per retained policy.
-        - **Retention Success Rate (60%)**: Estimated recovery rate of contacted defaulters.
-        """)
-
-    with c2:
-        st.success("""
-        **Verified Benchmark Performance (Held-Out Test Set)**:
-        - **Projected Net Benefit**: **$186,710**
-        - **Return on Investment (ROI)**: **3,224.7%**
-        - **Intervention Budget Required**: **$5,790**
-        - **Probability Calibration**: Isotonic calibration prevents overspending on low-confidence false positives.
-        """)

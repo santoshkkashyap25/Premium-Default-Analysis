@@ -127,11 +127,9 @@ class InferencePipeline:
             'customer_id': customer_ids,
             'default_probability': np.round(default_probs, 4),
             'on_time_probability': np.round(on_time_probs, 4),
-            'non_payer_probability': np.round(default_probs, 4),
             'predicted_status': predicted_status,
             'risk_tier': tiers,
             'recommended_action': actions,
-            'intervention_action': actions,
             'intervention_cost': costs
         })
 

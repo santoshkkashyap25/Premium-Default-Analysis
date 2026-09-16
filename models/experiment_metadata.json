@@ -81,6 +81,7 @@
     "income_median": 165140.0,
     "late_premium_max": 19.0,
     "income_clip_lower": 70070.0,
-    "income_clip_upper": 450040.0
+    "income_clip_upper": 450040.0,
+    "cash_credit_median": 0.167
   }
 }

@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_METADATA_PATH = PROJECT_ROOT / "models" / "experiment_metadata.json"
 
 RES_AREA_MAP = {'Urban': 1, 'Rural': 0}
-SOURCING_MAP = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
+SOURCING_MAP = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'Unknown / Other': 0, 'Unknown': 0, 'Other': 0}
 
 AGE_BINS = [-np.inf, 35, 50, 65, 80, np.inf]
 AGE_LABELS = list(range(len(AGE_BINS) - 1))
@@ -70,6 +70,7 @@ def preprocess_for_inference(df: pd.DataFrame, metadata: dict = None) -> pd.Data
     late_max = stats.get('late_premium_max', 19.0)
     inc_clip_lower = stats.get('income_clip_lower', 70070.0)
     inc_clip_upper = stats.get('income_clip_upper', 450040.0)
+    cash_credit_median = stats.get('cash_credit_median', 0.167)
 
     feature_names = metadata.get('feature_names_tree', None)
 
@@ -125,8 +126,8 @@ def preprocess_for_inference(df: pd.DataFrame, metadata: dict = None) -> pd.Data
     d['payment_reliability'] = (d['no_of_premiums_paid'] / (d['no_of_premiums_paid'] + d['late_premium'] + 1e-5)).astype(float)
 
     if 'perc_premium_paid_by_cash_credit' not in d.columns:
-        d['perc_premium_paid_by_cash_credit'] = 0.0
-    d['perc_premium_paid_by_cash_credit'] = pd.to_numeric(d['perc_premium_paid_by_cash_credit'], errors='coerce').fillna(0.0).astype(float)
+        d['perc_premium_paid_by_cash_credit'] = cash_credit_median
+    d['perc_premium_paid_by_cash_credit'] = pd.to_numeric(d['perc_premium_paid_by_cash_credit'], errors='coerce').fillna(cash_credit_median).astype(float)
     d['high_cash_late_combo'] = ((d['perc_premium_paid_by_cash_credit'] > 0.5) & (d['late_premium'] > 2)).astype(int)
 
     d['zero_late_payments'] = (d['late_premium'] == 0).astype(int)
