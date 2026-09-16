@@ -4,9 +4,12 @@
 [![XGBoost](https://img.shields.io/badge/Model-Calibrated_XGBoost-EB5424?logo=xgboost&logoColor=white)](https://xgboost.readthedocs.io/)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Render](https://img.shields.io/badge/Render-Live_Demo-46E3B7?logo=render&logoColor=white)](https://insurance-default-risk-profiler.onrender.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 > **Predicting insurance policy payment default under severe class imbalance through probability calibration and asymmetric cost optimization.**
+>
+> 🔗 **Live Web Application**: [https://insurance-default-risk-profiler.onrender.com/](https://insurance-default-risk-profiler.onrender.com/)
 
 ---
 
