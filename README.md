@@ -19,7 +19,7 @@ When an insurance policy lapses due to non-payment, the insurer incurs an **asym
 
 ---
 
-## Navigating Severe Class Imbalance: Why Accuracy Fails
+## Navigating Severe Class Imbalance
 
 ### 1. The Accuracy Illusion
 In our 79,853 policyholder benchmark dataset:
