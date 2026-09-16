@@ -4,7 +4,6 @@
 [![XGBoost](https://img.shields.io/badge/Model-Calibrated_XGBoost-EB5424?logo=xgboost&logoColor=white)](https://xgboost.readthedocs.io/)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Render](https://img.shields.io/badge/Deploy-Render-46E3B7?logo=render&logoColor=white)](https://render.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 > **Predicting insurance policy payment default under severe class imbalance through probability calibration and asymmetric cost optimization.**
@@ -103,18 +102,6 @@ Empirical feature importance reveals that dynamic payment behavior heavily outwe
 3. **Payment Reliability Ratio**: Non-linear feature $\frac{\text{Premiums Paid}}{\text{Premiums Paid} + \text{Total Late Payments}}$ accurately captures recovery trajectory in tenured policyholders.
 4. **Underwriting Score Missingness**: Unrecorded underwriting scores (`underwriting_score_missing = 1`) reflect distinct risk characteristics captured natively by the pipeline.
 
----
-
-## Live Application
-
-The production system is deployed on Render:
-
-🔗 **Live Web Application**: [https://premium-default-analysis.onrender.com](https://premium-default-analysis.onrender.com) *(Update with your active deployment link)*
-
-### Application Capabilities:
-- **Single Policyholder Profiler**: Real-time customer assessment form with dynamic lapse risk gauge, risk tier assignment, and prescribed operational protocols. Includes persistent controls and a dedicated "Reset to Defaults" button for fast multi-customer workflows.
-- **Portfolio Batch Processing**: Ingest full CSV portfolios to generate operational risk distributions, calculate portfolio-wide outreach budgets, and download enriched scoring datasets.
-- **Embedded Column Glossary**: Interactive expander defining every output attribute and business definition.
 
 ---
 
