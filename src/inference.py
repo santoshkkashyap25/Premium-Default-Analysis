@@ -46,12 +46,6 @@ class InferencePipeline:
 
     def __init__(self, model_path=None, metadata_path=None):
         self.model_path = Path(model_path) if model_path else DEFAULT_MODEL_PATH
-        if not self.model_path.exists():
-            # Fallback to best_model.pkl if champion_model.pkl is missing
-            fallback = PROJECT_ROOT / "models" / "best_model.pkl"
-            if fallback.exists():
-                self.model_path = fallback
-
         self.metadata_path = Path(metadata_path) if metadata_path else DEFAULT_METADATA_PATH
         self.metadata = self._load_metadata()
         self.model = self._load_model()
@@ -64,7 +58,7 @@ class InferencePipeline:
         if not self.model_path.exists():
             raise FileNotFoundError(
                 f"Trained champion model not found at {self.model_path}. "
-                "Please verify models/champion_model.pkl or models/best_model.pkl."
+                "Please verify models/champion_model.pkl."
             )
         with open(self.model_path, "rb") as f:
             return pickle.load(f)

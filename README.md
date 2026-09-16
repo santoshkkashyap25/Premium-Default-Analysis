@@ -44,34 +44,23 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Train Models
+### Run Interactive Dashboard & Batch Scoring
 
 ```bash
-# Run full model training pipeline (feature engineering, calibration, ensembles, business ROI)
-python train.py
+# Launch Interactive Streamlit Web Dashboard
+streamlit run app.py
 
-# Optional: Run fast training mode (skips Optuna hyperparameter search)
-python train.py --fast
-```
+# Run CLI Batch Scoring on Dataset
+python pipeline.py --data data/new_customers.csv --output outputs/scored_customers.csv
 
-### Make Predictions & Interactive Dashboard
-
-```bash
-# Launch Interactive Streamlit Web Dashboard (Windows venv)
-.\venv\Scripts\streamlit run app.py
-
-# Or Start Real-Time REST API Server
+# Or Start Real-Time FastAPI REST Server
 python predict.py
-
 ```
 
-
-
-
-### Sample Request (using `curl`)
+### Sample Request (FastAPI REST Service)
 
 ```bash
-curl -X POST http://127.0.0.1:5000/predict \
+curl -X POST http://127.0.0.1:8000/predict \
      -H "Content-Type: application/json" \
      -d '{
            "id": 110936,
@@ -213,7 +202,9 @@ Current spend: $180k → $425k net benefit -->
 - Plotly (interactive dashboards)
 
 **Deployment:**
-- Flask API for real-time scoring
+- Streamlit interactive web application (`app.py`)
+- FastAPI high-performance REST service (`predict.py`)
+- CLI batch scoring pipeline (`pipeline.py`)
 
 
 ## Key Learnings
