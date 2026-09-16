@@ -1,216 +1,144 @@
-# Insurance Premium Payment Prediction System
+# Insurance Premium Default Risk Profiler
 
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![XGBoost](https://img.shields.io/badge/Model-Calibrated_XGBoost-EB5424?logo=xgboost&logoColor=white)](https://xgboost.readthedocs.io/)
+[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Render](https://img.shields.io/badge/Deploy-Render-46E3B7?logo=render&logoColor=white)](https://render.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-> An end-to-end machine learning solution to predict insurance policy payment defaults through intelligent risk-based interventions.
+> **Predicting insurance policy payment default under severe class imbalance through probability calibration and asymmetric cost optimization.**
 
-## Project Overview
+---
 
-### Business Problem
-Insurance companies face significant revenue loss due to policy lapses when customers fail to pay premiums on time. This project builds a predictive model to identify high-risk customers **before** they default, enabling proactive interventions.
+## Problem Statement
 
-## Key Features
+When an insurance policy lapses due to non-payment, the insurer incurs an **asymmetric financial loss**:
+- **Severe Capital Destruction**: The insurer forfeits customer acquisition cost, future recurring premium revenue, and underwriting margins (~$500+ lifetime policy value lost per lapse).
+- **The Operational Dilemma**: Blanket outreach to the entire portfolio is economically wasteful and causes customer fatigue for on-time payers. Conversely, passive collection strategies fail to rescue savable accounts before their grace period expires.
+- **The Objective**: Accurately predict policyholders with high probability of default in advance, routing each account into an economically rational, cost-tiered intervention workflow that maximizes net revenue preserved while minimizing operational expenditure.
 
-### 1. Advanced Feature Engineering
-- Created **13 interaction features** capturing complex customer behavior patterns
-- Risk composite scores combining payment history, demographics, and financial indicators
-- Weighted late payment indicators prioritizing recent behavior
+---
 
-### 2. Imbalanced Data Handling
-- Multi-strategy approach: SMOTE, class weights, cost-sensitive learning
-- Achieved optimal precision-recall trade-off for 94:6 class imbalance
-- Custom cost matrix ($500 missed default vs $10 false alarm)
+## Navigating Severe Class Imbalance: Why Accuracy Fails
 
-### 3. Model Ensemble & Calibration
-- **Stacking ensemble** combining Random Forest, XGBoost, LightGBM, and Logistic Regression
-- **Probability calibration** using isotonic regression for reliable risk scores
-- **Threshold optimization** maximizing F1-score for minority class
+### 1. The Accuracy Illusion
+In our 79,853 policyholder benchmark dataset:
+- **93.7%** of policyholders pay on time (Class 1).
+- Only **6.3%** default on their premium (Class 0).
 
+A naive baseline classifier that predicts *every customer will pay on time* achieves **93.7% accuracy**. However, such a system detects zero defaulters, prevents zero lapses, and produces **$0 in preserved financial value**.
 
-## Quick Start
+### 2. Ground Truth Evaluation Strategy
+Because standard ROC-AUC and accuracy are artificially inflated by the majority class, this system evaluates performance strictly using **Precision-Recall AUC (PR-AUC)**, **Defaulter Recall**, and **Cost-Weighted Net Benefit**:
 
-### Installation
+- **Baseline Random Guess Precision**: 6.3%
+- **Model Defaulter Precision**: **35.9%** (**5.7x precision lift** over random baseline)
+- **Defaulter Recall**: **38.5%** (identifies nearly 40% of all lapses in advance)
+- **Precision-Recall AUC**: **0.2954** (vs. 0.063 baseline)
+- **ROC-AUC**: **0.8426**
 
-```bash
-# Clone repository
-git clone https://github.com/santoshkkashyap25/Premium-Default-Analysis.git
-cd Premium-Default-Analysis
+**Operational Translation**: Out of every 100 accounts flagged by our system, approximately **36 are verified defaulters**. This enables retention teams to allocate high-touch phone outreach and physical mail sequences strictly to accounts where default risk is real and intervention ROI is provably positive.
 
+---
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+## The Probability Calibration Breakthrough
 
-# Install dependencies
-pip install -r requirements.txt
+Tree-based ensemble models (XGBoost, Random Forest, LightGBM) produce reliable ranking scores, but their raw output probabilities are heavily distorted near the distribution tails.
+
+In cost-sensitive retention, uncalibrated probabilities cause **severe capital overspending**: the model appears artificially overconfident on marginal false alarms, triggering expensive phone interventions for customers who would have paid anyway.
+
+### Empirical Candidate Benchmark (Held-Out Test Set)
+
+By applying **Isotonic Regression calibration** and optimizing decision thresholding on the validation Precision-Recall curve (**optimal threshold: 0.768 on on-time probability**), we achieved a massive economic turnaround:
+
+| Model Candidate | Decision Threshold | Test Recall (Defaulters) | Test Precision | Intervention Budget | Net Benefit | ROI |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **XGBoost (Calibrated)** *(Champion)* | **0.768** | **38.5%** | **35.9%** | **$5,790** | **$186,710** | **3,224.7%** |
+| XGBoost (Optuna Tuned) | 0.552 | 41.3% | 34.7% | $32,210 | $174,290 | 541.1% |
+| Random Forest | 0.328 | 42.5% | 31.9% | $93,918 | $118,582 | 126.3% |
+| Logistic Regression + SMOTE | 0.344 | 37.8% | 33.4% | $72,184 | $116,816 | 161.8% |
+| Balanced Random Forest | 0.280 | 45.3% | 32.6% | $120,464 | $106,036 | 88.0% |
+| Stacking Ensemble | 0.177 | 39.5% | 34.1% | $140,020 | $57,480 | 41.1% |
+| XGBoost (Cost-Sensitive) | 0.073 | 35.4% | 36.0% | $280,938 | -$103,938 | -37.0% |
+
+> **Empirical Insight**: Brute-force cost-sensitive weighting during training failed (-$103k net loss) because it flooded collection teams with false positives. Conversely, **well-calibrated probabilities paired with optimal post-hoc thresholding** compressed outreach expenditure from $140k+ to just $5,790 while delivering a verified **$186,710 net benefit (3,224.7% ROI)**.
+
+---
+
+## Operational Risk-Tier Matrix
+
+Calibrated default probabilities feed directly into four operational intervention tiers:
+
+```
+Calibrated Default Probability
+ │
+ ├── > 70%  ────────►  High Risk ($50 outreach)
+ │                     Outbound concierge call + payment restructuring
+ │
+ ├── 40% – 70%  ────►  Medium Risk ($10 outreach)
+ │                     Direct mail statement + priority SMS alert sequence
+ │
+ ├── 20% – 40%  ────►  Low-Medium Risk ($2 outreach)
+ │                     Automated 2-touch SMS payment link
+ │
+ └── ≤ 20%  ────────►  Low Risk ($0 outreach)
+                       Standard automated digital billing invoice
 ```
 
-### Run Interactive Dashboard & Batch Scoring
+### Financial Payoff Equation
+$$\text{Net Benefit} = (\text{True Positives} \times \text{Lapse Value} \times \text{Recovery Rate}) - \text{Total Intervention Spend}$$
+- **Lapse Value Preserved**: $500 per successfully retained policy
+- **Recovery Rate**: 60% recovery assumption for contacted defaulters
+- **Cost of False Negatives**: $500 lifetime value lost if a defaulter lapses undetected
 
-```bash
-# Launch Interactive Streamlit Web Dashboard
-streamlit run app.py
+---
 
-# Run CLI Batch Scoring on Dataset
-python pipeline.py --data data/new_customers.csv --output outputs/scored_customers.csv
+## Behavioral Drivers & Feature Insights
 
-# Or Start Real-Time FastAPI REST Server
-python predict.py
-```
+Empirical feature importance reveals that dynamic payment behavior heavily outweighs static demographic markers:
 
-### Sample Request (FastAPI REST Service)
+1. **Delinquency Recency (`Count_3-6_months_late`)**: The single most dominant default indicator. Accounts with even one 3–6 month late payment are over 4x more likely to lapse.
+2. **Payment Channel (`perc_premium_paid_by_cash_credit`)**: Policyholders paying via cash or credit card default at more than double the rate of those on automated bank ACH drafts.
+3. **Payment Reliability Ratio**: Non-linear feature $\frac{\text{Premiums Paid}}{\text{Premiums Paid} + \text{Total Late Payments}}$ accurately captures recovery trajectory in tenured policyholders.
+4. **Underwriting Score Missingness**: Unrecorded underwriting scores (`underwriting_score_missing = 1`) reflect distinct risk characteristics captured natively by the pipeline.
 
-```bash
-curl -X POST http://127.0.0.1:8000/predict \
-     -H "Content-Type: application/json" \
-     -d '{
-           "id": 110936,
-           "perc_premium_paid_by_cash_credit": 0.429,
-           "age_in_days": 12058,
-           "Income": 355060,
-           "Count_3-6_months_late": 0,
-           "Count_6-12_months_late": 0,
-           "Count_more_than_12_months_late": 0,
-           "application_underwriting_score": 99.02,
-           "no_of_premiums_paid": 13,
-           "sourcing_channel": "C",
-           "residence_area_type": "Urban"
-         }'
-```
+---
 
-### Sample Response
+## Live Application
 
-```json
-{
-    "customer_id": 110936,
-    "on_time_probability": 0.85,
-    "non_payer_probability": 0.15,
-    "risk_tier": "Medium Risk",
-    "recommended_action": "Email + SMS reminder",
-    "intervention_cost": 10,
-    "model_confidence": "high"
-}
-```
+The production system is deployed on Render:
 
+🔗 **Live Web Application**: [https://premium-default-analysis.onrender.com](https://premium-default-analysis.onrender.com) *(Update with your active deployment link)*
 
-## Model Performance
+### Application Capabilities:
+- **Single Policyholder Profiler**: Real-time customer assessment form with dynamic lapse risk gauge, risk tier assignment, and prescribed operational protocols. Includes persistent controls and a dedicated "Reset to Defaults" button for fast multi-customer workflows.
+- **Portfolio Batch Processing**: Ingest full CSV portfolios to generate operational risk distributions, calculate portfolio-wide outreach budgets, and download enriched scoring datasets.
+- **Embedded Column Glossary**: Interactive expander defining every output attribute and business definition.
 
-### Classification Metrics (Test Set)
-- **F1-Score (Class 0):** 0.358
-- **Recall (Class 0):** 0.390 (identifies 39% of defaulters)
-- **Precision (Class 0):** 0.333 (33% of flagged customers default)
-- **ROC-AUC:** 0.825
-- **Accuracy:** 0.915
+---
 
-### Projected Business Impact
-Based on model performance metrics and conservative business assumptions:
+## Robust Handling of Incomplete Records
 
-- **Monthly Net Benefit:** $115,482
-- **Annual Benefit (Projected):** $1,385,784
-- **ROI:** 96%
-- **Intervention Cost:** $146,118/month
-- **Non-payers Identified:** 39% of actual defaults
+In production environments, policy records often lack complete data. The inference pipeline handles missing attributes silently using learned training statistics without data leakage:
 
-### Risk Tier Distribution
-- **High Risk (>70%):** 13.1% of customers → Personal call ($50)
-- **Medium Risk (40-70%):** 20.2% → Email + SMS ($10)
-- **Low-Medium Risk (20-40%):** 30.1% → SMS only ($2)
-- **Low Risk (<20%):** 36.6% → Standard communication ($0)
+- **Underwriting Score Missing**: Flags `underwriting_score_missing = 1` and imputes score with the training median (`99.21`).
+- **Payment Method Unrecorded**: Imputes `perc_premium_paid_by_cash_credit` with the population median (`0.167`).
+- **Sourcing Channel Unknown**: Maps unrecorded acquisition channels to Channel A (`0`, the mode comprising 54% of training records).
 
-## Technical Approach
+---
 
-### 1. Exploratory Data Analysis
-- Analyzed 80,000+ insurance policies across 11 features
-- Identified severe class imbalance (94% on-time, 6% defaults)
-- Discovered strong predictors: late payment history (28.7% importance), cash payment % (27.3%)
-- Handled outliers using IQR method (removed top/bottom 5%)
+## Standalone Research Notebooks
 
-### 2. Feature Engineering
-```python
-# Key engineered features
-- payment_reliability = on_time_payments / total_payments
-- composite_risk = (1 - underwriting_score) * 0.4 + normalized_late_count * 0.6
-- financial_stress = (income < Q1) & (late_premium > 1)
-- high_cash_late_combo = (cash_payment > 0.5) & (late_count > 2)
-- recent_late_weighted = 3*late_3_6m + 2*late_6_12m + 1*late_12m+
-```
+The research and benchmarking pipeline is fully documented in two standalone, reproducible notebooks in `notebooks/`:
+- `Default_Prediction_EDA.ipynb`: Exploratory data analysis, class imbalance diagnostics, and feature interaction studies.
+- `Default_Prediction_Model.ipynb`: Candidate model evaluations, Bayesian hyperparameter optimization (Optuna), isotonic probability calibration, and financial ROI simulation.
 
-### 3. Model Development
+---
 
-**Models Evaluated:**
-- Logistic Regression (baseline)
-- Decision Tree
-- Random Forest
-- XGBoost
-- LightGBM
-- Balanced Random Forest
-- **Stacking Ensemble** ← Final model
+## Technical Stack
 
-**Hyperparameter Tuning:**
-- Optuna framework for Bayesian optimization
-- 5-fold cross-validation on validation set
-- Optimized for F1-score of minority class
-
-**Calibration:**
-- Isotonic regression for probability calibration
-- Improved reliability of risk scores
-- Fixed XGBoost threshold issue (0.984 → 0.458)
-
-### 4. Threshold Optimization
-```python
-# Business-driven threshold selection
-optimal_threshold = find_threshold_maximizing_f1(
-    model, validation_data, target_class=0
-)
-# Result: 0.458 (vs default 0.5)
-# Impact: +5% F1-score
-```
-
-## Visualizations
-
-### Feature Importance
-![Feature Importance](outputs/feature_importance.png)
-
-
-### Model Calibration
-![Calibration](outputs/calibration_comparison.png)
-
-Before calibration: Probabilities poorly aligned with actual frequencies  
-After calibration: Perfect diagonal alignment
-
-<!-- ### ROI Analysis
-![ROI](outputs/roi_analysis.png)
-
-Break-even at $120k monthly intervention cost  
-Current spend: $180k → $425k net benefit -->
-
-## Technologies Used
-
-**Languages & Frameworks:**
-- Python 3.8+
-- scikit-learn 1.0+
-- XGBoost, LightGBM
-- imbalanced-learn
-- Optuna (hyperparameter tuning)
-
-**Data Processing:**
-- Pandas, NumPy
-- Feature engineering pipelines
-- Custom preprocessing classes
-
-**Visualization:**
-- Matplotlib, Seaborn
-- Plotly (interactive dashboards)
-
-**Deployment:**
-- Streamlit interactive web application (`app.py`)
-- FastAPI high-performance REST service (`predict.py`)
-- CLI batch scoring pipeline (`pipeline.py`)
-
-
-## Key Learnings
-
-1. **Class Imbalance**: Balanced accuracy can be misleading; focus on F1-score and recall for minority class
-2. **Cost-Sensitive Learning**: Optimizing for business metrics (ROI) > optimizing for accuracy
-3. **Probability Calibration**: Critical for reliable risk scoring in production
-4. **Feature Engineering**: Domain knowledge > complex algorithms; interaction features captured patterns simple features missed
-5. **Threshold Optimization**: Default 0.5 threshold rarely optimal for imbalanced data
+- **Modeling**: XGBoost, Scikit-Learn (IsotonicRegression, CalibratedClassifierCV), LightGBM, Imbalanced-Learn
+- **Serving & Web Application**: Streamlit, FastAPI, Pydantic, Uvicorn
+- **Data Engineering**: Pandas, NumPy
+- **Environment**: Python 3.11+
